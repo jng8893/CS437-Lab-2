@@ -4,6 +4,7 @@ from collections import deque
 import signal
 import time
 from picarx import Picarx
+from robot_hat import utils
 
 server_addr = 'D8:3A:DD:E9:35:3E'
 server_port = 1
@@ -20,11 +21,20 @@ tx_message_deque = deque([])
 rx_message_deque = deque([])
 output = ""
 
-dq_lock = threading.Lock()
-output_lock = threading.Lock()
+tx_lock = threading.Lock()
+rx_lock = threading.Lock()
 
 # Instantiate Picar-X
 picar = Picarx()
+
+def get_battery_voltage(*args) -> float:
+    """
+    Returns battery voltage of the Picar.
+
+    Returns:
+        float: Battery voltage.
+    """
+    return utils.get_battery_voltage()
 
 def get_cliff_status(*args) -> bool:
     """
@@ -44,10 +54,92 @@ def get_ultrasonic_distance(*args) -> float:
     """
     return picar.get_distance()
 
+def set_camera_pan_angle(angle) -> int:
+    """
+    Sets camera pan angle.
+
+    Args:
+        angle (int): Camera pan angle, in degrees.
+
+    Returns:
+        int: New servo angle, in degrees.
+    """
+    picar.set_cam_pan_angle(int(angle))
+    return int(angle)
+
+def set_camera_tilt_angle(angle) -> int:
+    """
+    Sets camera tilt angle.
+
+    Args:
+        angle (int): Camera tilt angle, in degrees.
+
+    Returns:
+        int: New servo angle, in degrees.
+    """
+    picar.set_cam_tilt_angle(int(angle))
+    return int(angle)
+
+def set_direction_servo_angle(angle) -> int:
+    """
+    Sets direction servo angle.
+
+    Args:
+        angle (int): Direction servo angle, in degrees.
+
+    Returns:
+        int: New servo angle, in degrees.
+    """
+    picar.set_dir_servo_angle(int(angle))
+    return int(angle)
+
+def forward(speed):
+    """
+    Moves Picar-X forwards at the specified speed.
+
+    Args:
+        speed (int): Forwards speed, as duty cycle percentage.
+
+    Returns:
+        int: New motor speed, as duty cycle percentage.
+    """
+    picar.forward(int(speed))
+    return int(speed)
+
+def backward(speed):
+    """
+    Moves Picar-X backwards at the specified speed.
+
+    Args:
+        speed (int): Backwards speed, as duty cycle percentage.
+
+    Returns:
+        int: New motor speed, as duty cycle percentage.
+    """
+    picar.backward(int(speed))
+    return int(speed)
+
+def stop(*args):
+    """
+    _summary_
+
+    Returns:
+        int: New motor speed as duty cycle percentage, always 0.
+    """
+    picar.stop()
+    return 0
+
 def call_supported_func(func_name, *args):
     supported_funcs = {
+        "get_battery_voltage": get_battery_voltage,
         "get_cliff_status": get_cliff_status,
         "get_ultrasonic_distance": get_ultrasonic_distance,
+        "set_camera_pan_angle": set_camera_pan_angle,
+        "set_camera_tilt_angle": set_camera_tilt_angle,
+        "set_direction_servo_angle": set_direction_servo_angle,
+        "forward": forward,
+        "backward": backward,
+        "stop": stop,
     }
 
     func = supported_funcs.get(func_name, None)
@@ -55,7 +147,7 @@ def call_supported_func(func_name, *args):
         print(f"Received unsupported function call: {func_name}({args})")
         return None
 
-    return f"{func_name} {func(*args)}"
+    return f"{func_name} {func(*args)}\r\n"
 
 def handler(signum, frame):
     exit_event.set()
@@ -70,8 +162,8 @@ def start_client():
     global exit_event
     global tx_message_deque
     global output
-    global dq_lock
-    global output_lock
+    global tx_lock
+    global rx_lock
 
     server_sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
     server_sock.bind((server_addr, server_port))
@@ -88,7 +180,7 @@ def start_client():
     while not exit_event.is_set():
 
         # Receive message from the client
-        if output_lock.acquire(blocking=False):
+        if rx_lock.acquire(blocking=False):
             data = ""
             try:
                 data = sock.recv(1024).decode('utf-8')
@@ -112,7 +204,7 @@ def start_client():
             # Update received output to any remaining message fragment
             # Will be an empty string if there is no remaining message fragment
             output = output_split[-1]
-            output_lock.release()
+            rx_lock.release()
 
         # Parse function and args to call from message
         if len(rx_message_deque) > 0:
@@ -122,12 +214,13 @@ def start_client():
             # Call function with args
             ret_val = call_supported_func(func_name, *rx_message_parts)
 
-            # TODO: Send back results of called function
-            print(ret_val)
-            # tx_message_deque.append(ret_val)
+            # Queue results of called function for transmission
+            if tx_lock.acquire(blocking=False):
+                tx_message_deque.append(ret_val)
+                tx_lock.release()
 
         # Send each message in the deque
-        if dq_lock.acquire(blocking=False):
+        if tx_lock.acquire(blocking=False):
             if(len(tx_message_deque) > 0):
                 # Attempt sending the current message
                 try:
@@ -144,7 +237,7 @@ def start_client():
                     tx_message_deque[0] = tx_message_deque[0][bytes_sent:]
                 else:
                     tx_message_deque.popleft()
-            dq_lock.release()
+            tx_lock.release()
 
     # Cleanup
     server_sock.close()

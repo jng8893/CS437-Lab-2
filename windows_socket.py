@@ -18,12 +18,19 @@ exit_event = threading.Event()
 tx_message_deque = deque([])
 output = ""
 
-dq_lock = threading.Lock()
-output_lock = threading.Lock()
+tx_lock = threading.Lock()
+rx_lock = threading.Lock()
 
 rx_retvals = {
+    "get_battery_voltage": None,
     "get_cliff_status": None,
     "get_ultrasonic_distance": None,
+    "set_camera_pan_angle": None,
+    "set_camera_tilt_angle": None,
+    "set_direction_servo_angle": None,
+    "forward": None,
+    "backward": None,
+    "stop": None,
 }
 
 def send_supported_func(func_name, *args):
@@ -34,12 +41,12 @@ def send_supported_func(func_name, *args):
     if not args:
         message = func_name + "\r\n"
     else:
-        message = func_name + " ".join(args) + "\r\n"
+        message = func_name + ' ' + " ".join([str(arg) for arg in args]) + "\r\n"
 
-    if dq_lock.acquire(blocking=False):
-        print(f"Queueing message {message}")
+    if tx_lock.acquire(blocking=False):
+        # print(f"Queueing message {message}")
         tx_message_deque.append(message)
-        dq_lock.release()
+        tx_lock.release()
 
 
 def handler(signum, frame):
@@ -49,8 +56,8 @@ signal.signal(signal.SIGINT, handler)
 
 def start_client():
     global sock
-    global dq_lock
-    global output_lock
+    global tx_lock
+    global rx_lock
     global exit_event
     global tx_message_deque
     global output
@@ -65,11 +72,10 @@ def start_client():
     sock.setblocking(False)
 
     while not exit_event.is_set():
-        if dq_lock.acquire(blocking=False):
+        if tx_lock.acquire(blocking=False):
             if(len(tx_message_deque) > 0):
                 try:
                     sent = sock.send(bytes(tx_message_deque[0], 'utf-8'))
-                    print(f"Sent {tx_message_deque[0]}")
                 except Exception as e:
                     exit_event.set()
                     continue
@@ -77,9 +83,9 @@ def start_client():
                     tx_message_deque[0] = tx_message_deque[0][sent:]
                 else:
                     tx_message_deque.popleft()
-            dq_lock.release()
+            tx_lock.release()
 
-        if output_lock.acquire(blocking=False):
+        if rx_lock.acquire(blocking=False):
             data = ""
             try:
                 data = sock.recv(1024).decode("utf-8")
@@ -89,12 +95,16 @@ def start_client():
             except Exception as e:
                 exit_event.set()
                 continue
+
             output += data
             output_split = output.split("\r\n")
-            for i in range(len(output_split) - 1):
-                print(output_split[i])
+            for rx_message in output_split[:-1]:
+                rx_message_parts = rx_message.split(" ")
+                func_name = rx_message_parts.pop(0)
+                retval = rx_message_parts.pop(0)
+                rx_retvals[func_name] = retval
             output = output_split[-1]
-            output_lock.release()
+            rx_lock.release()
 
     sock.close()
     print("client thread end")
@@ -102,11 +112,23 @@ def start_client():
 if __name__ == "__main__":
     cth = threading.Thread(target=start_client)
     cth.start()
+    send_supported_func("set_camera_pan_angle", 30)
+    time.sleep(2.0)
+    print(rx_retvals)
+    send_supported_func("set_camera_pan_angle", -30)
+    time.sleep(2.0)
+    print(rx_retvals)
+    send_supported_func("set_camera_pan_angle", 0)
+    time.sleep(2.0)
+    print(rx_retvals)
 
     while not exit_event.is_set():
         # TODO: print retval from Raspberrry Pi
-        send_supported_func("get_cliff_status")
-        send_supported_func("get_ultrasonic_distance")
+        if len(output) == 0:
+            send_supported_func("get_battery_voltage")
+            send_supported_func("get_cliff_status")
+            send_supported_func("get_ultrasonic_distance")
+            print(rx_retvals)
         time.sleep(2)
 
     print("Disconnected.")
