@@ -26,7 +26,9 @@ rx_lock = threading.Lock()
 
 # Instantiate Picar-X
 picar = Picarx()
+picar.stop()    # This instantiates the motors' PWM percentage to 0
 
+# TODO: *args is used to ensure that the function accepts null (ie. '') args, but unsure if this is needed.
 def get_battery_voltage(*args) -> float:
     """
     Returns battery voltage of the Picar.
@@ -44,6 +46,27 @@ def get_cliff_status(*args) -> bool:
         bool: Cliff detection status.
     """
     return picar.get_cliff_status(picar.get_grayscale_data())
+
+def get_direction_servo_angle(*args) -> int:
+    """
+    Returns direction servo's angle.
+
+    Returns:
+        int: Direction servo's angle, in degrees.
+    """
+    return picar.dir_current_angle
+
+def get_motor_pwm_percentage(*args) -> int:
+    """
+    Returns motor pulse width modulation percentage.
+
+    Just the left motor's percentage is used - the right motor's percentage is inverted
+        (negative for forwards, positive for reverse).
+
+    Returns:
+        int: Motor pulse width modulation percentage
+    """
+    return picar.motor_speed_pins[1].pulse_width_percent()
 
 def get_ultrasonic_distance(*args) -> float:
     """
@@ -65,6 +88,7 @@ def set_camera_pan_angle(angle) -> int:
         int: New servo angle, in degrees.
     """
     picar.set_cam_pan_angle(int(angle))
+    # We do not have access to the pan servo's angle, so we echo the set value
     return int(angle)
 
 def set_camera_tilt_angle(angle) -> int:
@@ -78,6 +102,7 @@ def set_camera_tilt_angle(angle) -> int:
         int: New servo angle, in degrees.
     """
     picar.set_cam_tilt_angle(int(angle))
+    # We do not have access to the tilt servo's angle, so we echo the set value
     return int(angle)
 
 def set_direction_servo_angle(angle) -> int:
@@ -91,7 +116,7 @@ def set_direction_servo_angle(angle) -> int:
         int: New servo angle, in degrees.
     """
     picar.set_dir_servo_angle(int(angle))
-    return int(angle)
+    return get_direction_servo_angle()
 
 def forward(speed):
     """
@@ -104,7 +129,7 @@ def forward(speed):
         int: New motor speed, as duty cycle percentage.
     """
     picar.forward(int(speed))
-    return int(speed)
+    return get_motor_pwm_percentage()
 
 def backward(speed):
     """
@@ -117,7 +142,7 @@ def backward(speed):
         int: New motor speed, as duty cycle percentage.
     """
     picar.backward(int(speed))
-    return int(speed)
+    return get_motor_pwm_percentage()
 
 def stop(*args):
     """
@@ -127,27 +152,29 @@ def stop(*args):
         int: New motor speed as duty cycle percentage, always 0.
     """
     picar.stop()
-    return 0
+    return get_motor_pwm_percentage()
 
 def call_supported_func(func_name, *args):
     supported_funcs = {
-        "get_battery_voltage": get_battery_voltage,
-        "get_cliff_status": get_cliff_status,
-        "get_ultrasonic_distance": get_ultrasonic_distance,
-        "set_camera_pan_angle": set_camera_pan_angle,
-        "set_camera_tilt_angle": set_camera_tilt_angle,
-        "set_direction_servo_angle": set_direction_servo_angle,
-        "forward": forward,
-        "backward": backward,
-        "stop": stop,
+        "get_battery_voltage": (get_battery_voltage, "battery_voltage"),
+        "get_cliff_status": (get_cliff_status, "cliff_status"),
+        "get_direction_servo_angle": (get_direction_servo_angle, "direction_servo_angle"),
+        "get_motor_pwm_percentage": (get_motor_pwm_percentage, "motor_pwm_percentage"),
+        "get_ultrasonic_distance": (get_ultrasonic_distance, "ultrasonic_distance"),
+        "set_camera_pan_angle": (set_camera_pan_angle, "camera_pan_angle"),
+        "set_camera_tilt_angle": (set_camera_tilt_angle, "camera_tilt_angle"),
+        "set_direction_servo_angle": (set_direction_servo_angle, "direction_servo_angle"),
+        "forward": (forward, "motor_pwm_percentage"),
+        "backward": (backward, "motor_pwm_percentage"),
+        "stop": (stop, "motor_pwm_percentage"),
     }
 
-    func = supported_funcs.get(func_name, None)
+    func, retval_name = supported_funcs.get(func_name, (None, None))
     if func is None:
         print(f"Received unsupported function call: {func_name}({args})")
         return None
 
-    return f"{func_name} {func(*args)}\r\n"
+    return f"{retval_name} {func(*args)}\r\n"
 
 def handler(signum, frame):
     exit_event.set()

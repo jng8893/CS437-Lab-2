@@ -21,20 +21,32 @@ output = ""
 tx_lock = threading.Lock()
 rx_lock = threading.Lock()
 
+supported_funcs = [
+    "get_battery_voltage",
+    "get_cliff_status",
+    "get_direction_servo_angle",
+    "get_motor_pwm_percentage",
+    "get_ultrasonic_distance",
+    "set_camera_pan_angle",
+    "set_camera_tilt_angle",
+    "set_direction_servo_angle",
+    "forward",
+    "backward",
+    "stop",
+]
+
 rx_retvals = {
-    "get_battery_voltage": None,
-    "get_cliff_status": None,
-    "get_ultrasonic_distance": None,
-    "set_camera_pan_angle": None,
-    "set_camera_tilt_angle": None,
-    "set_direction_servo_angle": None,
-    "forward": None,
-    "backward": None,
-    "stop": None,
+    "battery_voltage": None,
+    "cliff_status": None,
+    "ultrasonic_distance": None,
+    "camera_pan_angle": None,
+    "camera_tilt_angle": None,
+    "direction_servo_angle": None,
+    "motor_pwm_percentage": None,
 }
 
 def send_supported_func(func_name, *args):
-    if func_name not in rx_retvals:
+    if func_name not in supported_funcs:
         print(f"Cannot send unsupported function: {func_name}")
         return
 
@@ -113,20 +125,27 @@ if __name__ == "__main__":
     cth = threading.Thread(target=start_client)
     cth.start()
     send_supported_func("set_camera_pan_angle", 30)
+    send_supported_func("set_camera_tilt_angle", 30)
+    send_supported_func("set_direction_servo_angle", 30)
     time.sleep(2.0)
     print(rx_retvals)
     send_supported_func("set_camera_pan_angle", -30)
+    send_supported_func("set_camera_tilt_angle", -30)
+    send_supported_func("set_direction_servo_angle", -30)
     time.sleep(2.0)
     print(rx_retvals)
     send_supported_func("set_camera_pan_angle", 0)
+    send_supported_func("set_camera_tilt_angle", 0)
+    send_supported_func("set_direction_servo_angle", 0)
     time.sleep(2.0)
     print(rx_retvals)
 
     while not exit_event.is_set():
-        # TODO: print retval from Raspberrry Pi
         if len(output) == 0:
             send_supported_func("get_battery_voltage")
             send_supported_func("get_cliff_status")
+            send_supported_func("get_motor_pwm_percentage")
+            send_supported_func("get_direction_servo_angle")
             send_supported_func("get_ultrasonic_distance")
             print(rx_retvals)
         time.sleep(2)
